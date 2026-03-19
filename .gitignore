@@ -10,3 +10,4 @@ venv/
 *.orig
 .DS_Store
 session_chat.md
+*_review.md
