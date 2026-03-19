@@ -65,6 +65,33 @@ class TestAdaptive:
         assert abs(result.y[-1, 0] - exact) < 1e-4
 
 
+class TestBackwardEulerConvergence:
+    """Test that backward Euler properly detects convergence failures."""
+
+    def test_converges_on_linear_stiff(self):
+        """Backward Euler should converge on a stiff linear problem."""
+        def stiff_f(t, y):
+            return np.array([-100.0 * y[0]])
+
+        def stiff_jac(t, y):
+            return np.array([[-100.0]])
+
+        y = np.array([1.0])
+        # Large step relative to stiffness — this is where backward Euler shines
+        result = euler_backward_step(stiff_f, 0, y, 0.1, jacobian=stiff_jac)
+        # Should converge to something reasonable (exact: 1/(1+10) ≈ 0.0909)
+        assert abs(result[0] - 1.0 / 11.0) < 1e-6
+
+    def test_raises_on_nonconvergent(self):
+        """Newton should raise RuntimeError when it can't converge."""
+        def blowup_f(t, y):
+            return np.array([y[0]**2 + 1])
+
+        y = np.array([0.0])
+        with pytest.raises(RuntimeError, match="failed to converge"):
+            euler_backward_step(blowup_f, 0, y, 1.0)
+
+
 class TestTwoD:
     def test_predator_prey_conservation(self):
         """Classic Lotka-Volterra conserves a quantity — test RK4 preserves it approximately."""

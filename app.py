@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 
 from models import MODEL_REGISTRY
-from solvers import SOLVERS, SOLVER_ORDER, solve
+from solvers import SOLVERS, SOLVER_ORDER, solve, solve_delay
 from visualization.time_series import plot_time_series, plot_comparison
 from visualization.phase_plane import plot_phase_plane
 from visualization.error_plot import plot_error_analysis
@@ -144,125 +144,21 @@ This automatically uses small steps where needed and large steps where the solut
 """)
 
 
-# --- Build history function for delay model ---
-def _make_delay_solver_params(params, y0):
-    """For the delay model, we need to provide a history function.
-    Before t=tau, use the initial condition."""
-    solve_params = dict(params)
-    if model.has_delay:
-        tau = params.get("tau", 0)
-        # History stores the full solution; initially returns y0
-        _history_t = [0.0]
-        _history_y = [y0[0]]
-
-        def history_lookup(t_query):
-            if t_query <= 0:
-                return y0[0]
-            # Find nearest past value
-            idx = np.searchsorted(_history_t, t_query, side="right") - 1
-            idx = max(0, min(idx, len(_history_y) - 1))
-            return _history_y[idx]
-
-        solve_params["history"] = history_lookup
-        solve_params["_history_t"] = _history_t
-        solve_params["_history_y"] = _history_y
-    return solve_params
-
-
 def run_solver(step_fn, model, params, t_span, y0, h, adaptive, tol, order=1):
-    """Run the solver, handling delay model specially."""
+    """Run the solver, routing delay models to the dedicated delay solver."""
     if model.has_delay:
-        # For delay models, we integrate manually to build up history
-        solve_params = _make_delay_solver_params(params, y0)
-        history_t = solve_params.pop("_history_t")
-        history_y = solve_params.pop("_history_y")
-
-        result = solve(step_fn, model.f, t_span, y0, h,
-                       adaptive=adaptive, tol=tol or 1e-4, order=order,
-                       **solve_params)
-
-        # Rebuild history from result for accuracy
-        # (the simple history_lookup above works for forward integration)
-        return result
+        return solve_delay(step_fn, model.f, t_span, y0, h, params,
+                           adaptive=adaptive, tol=tol or 1e-4, order=order)
     else:
         return solve(step_fn, model.f, t_span, y0, h,
                      adaptive=adaptive, tol=tol or 1e-4, order=order,
                      **params)
 
 
-# --- Delay model: custom solver that builds history ---
-def solve_with_delay(step_fn, model, params, t_span, y0, h, adaptive, tol):
-    """Special solver for delay DDE that maintains a proper history."""
-    from solvers.adaptive import SolveResult
-
-    tau = params.get("tau", 0)
-    t0, tf = t_span
-    y = y0.copy()
-    t = t0
-
-    t_list = [t0]
-    y_list = [y0.copy()]
-    h_history = []
-    error_history = []
-    n_rejected = 0
-    max_steps = 100_000
-
-    step = 0
-    while t < tf - 1e-12 and step < max_steps:
-        current_h = min(h, tf - t)
-
-        def history(t_query):
-            if t_query <= t0:
-                return y0[0]
-            idx = np.searchsorted(t_list, t_query, side="right") - 1
-            idx = max(0, min(idx, len(y_list) - 1))
-            return y_list[idx][0]
-
-        f_kwargs = dict(params, history=history)
-
-        if adaptive:
-            y_full = step_fn(model.f, t, y, current_h, **f_kwargs)
-            y_half = step_fn(model.f, t, y, current_h / 2, **f_kwargs)
-            y_half = step_fn(model.f, t + current_h / 2, y_half, current_h / 2, **f_kwargs)
-            error = np.max(np.abs(y_half - y_full))
-
-            if error > (tol or 1e-4) and current_h > 1e-8:
-                h = max(current_h / 2, 1e-8)
-                n_rejected += 1
-                continue
-
-            y = y_half
-            h_history.append(current_h)
-            error_history.append(error)
-
-            if error < (tol or 1e-4) / 4 and current_h < (tf - t0) / 4:
-                h = min(current_h * 2, (tf - t0) / 4)
-        else:
-            y = step_fn(model.f, t, y, current_h, **f_kwargs)
-            h_history.append(current_h)
-            error_history.append(0.0)
-
-        t = t + h_history[-1]
-        t_list.append(t)
-        y_list.append(y.copy())
-        step += 1
-
-    return SolveResult(
-        t=np.array(t_list),
-        y=np.array(y_list),
-        h_history=h_history,
-        error_history=error_history,
-        n_rejected=n_rejected,
-    )
-
-
 # --- Run simulation ---
 with st.spinner("Running solver..."):
     solver_order = SOLVER_ORDER.get(solver_name, 1)
-    if model.has_delay:
-        result = solve_with_delay(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
-    else:
-        result = run_solver(step_fn, model, params, (0, t_max), y0, h, adaptive, tol, order=solver_order)
+    result = run_solver(step_fn, model, params, (0, t_max), y0, h, adaptive, tol, order=solver_order)
 
 # --- Tabs ---
 if model.n_dims == 2:
@@ -316,14 +212,9 @@ with tab_compare:
         for i, (sname, sfn) in enumerate(solver_list):
             progress.progress((i) / len(solver_list), text=f"Running {sname}...")
             sorder = SOLVER_ORDER.get(sname, 1)
-            if model.has_delay:
-                comparison_results[sname] = solve_with_delay(
-                    sfn, model, params, (0, t_max), y0, h, adaptive, tol
-                )
-            else:
-                comparison_results[sname] = run_solver(
-                    sfn, model, params, (0, t_max), y0, h, adaptive, tol, order=sorder
-                )
+            comparison_results[sname] = run_solver(
+                sfn, model, params, (0, t_max), y0, h, adaptive, tol, order=sorder
+            )
         progress.progress(1.0, text="Done!")
 
         fig_comp = plot_comparison(comparison_results, model.var_names)

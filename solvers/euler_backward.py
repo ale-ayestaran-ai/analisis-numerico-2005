@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 
 
@@ -6,18 +7,22 @@ def euler_backward_step(f, t, y, h, jacobian=None, **kwargs):
 
     Solves: y_{n+1} = y_n + h * f(t_{n+1}, y_{n+1})
     Uses Newton's method: F(y_{n+1}) = y_{n+1} - y_n - h*f(t_{n+1}, y_{n+1}) = 0
+
+    Raises RuntimeError if Newton iteration fails to converge.
     """
     t_next = t + h
     y_next = y + h * np.asarray(f(t, y, **kwargs))  # Forward Euler as initial guess
 
     max_iter = 20
     tol = 1e-10
+    converged = False
 
     for _ in range(max_iter):
         f_val = np.asarray(f(t_next, y_next, **kwargs))
         residual = y_next - y - h * f_val
 
         if np.max(np.abs(residual)) < tol:
+            converged = True
             break
 
         if jacobian is not None:
@@ -40,5 +45,14 @@ def euler_backward_step(f, t, y, h, jacobian=None, **kwargs):
             delta = np.linalg.solve(A, residual)
 
         y_next = y_next - delta
+
+    if not converged:
+        final_residual = np.max(np.abs(
+            y_next - y - h * np.asarray(f(t_next, y_next, **kwargs))
+        ))
+        raise RuntimeError(
+            f"Backward Euler Newton iteration failed to converge at t={t_next:.6g}; "
+            f"residual={final_residual:.3e}, max_iter={max_iter}"
+        )
 
     return y_next
