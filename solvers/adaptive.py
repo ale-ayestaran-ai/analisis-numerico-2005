@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 from dataclasses import dataclass, field
 
@@ -12,7 +13,7 @@ class SolveResult:
 
 
 def solve(step_fn, f, t_span, y0, h, adaptive=False, tol=1e-4,
-          h_min=1e-8, h_max=None, max_steps=100_000, **kwargs):
+          h_min=1e-8, h_max=None, max_steps=100_000, order=1, **kwargs):
     """Integrate an ODE system using the given step function.
 
     Uses Richardson extrapolation for error estimation in adaptive mode:
@@ -22,6 +23,10 @@ def solve(step_fn, f, t_span, y0, h, adaptive=False, tol=1e-4,
     - If error > tol: reject step, halve h
     - If error < tol/4 and h < h_max: accept step, double h
     - Otherwise: accept step, keep h
+
+    Args:
+        order: Method order (1 for Euler, 4 for RK4). Used to scale
+               the Richardson extrapolation error estimate correctly.
     """
     t0, tf = t_span
     y0 = np.asarray(y0, dtype=float)
@@ -51,14 +56,23 @@ def solve(step_fn, f, t_span, y0, h, adaptive=False, tol=1e-4,
             y_half = step_fn(f, t, y, h / 2, **kwargs)
             y_half = step_fn(f, t + h / 2, y_half, h / 2, **kwargs)
 
-            # Error estimate
-            error = np.max(np.abs(y_half - y_full))
+            # Error estimate (Richardson extrapolation, scaled by method order)
+            error = np.max(np.abs(y_half - y_full)) / ((2 ** order) - 1)
 
             if error > tol and h > h_min:
                 # Reject, halve step size
                 h = max(h / 2, h_min)
                 n_rejected += 1
+                step += 1  # count rejected steps to prevent infinite loops
                 continue
+
+            if error > tol:
+                # h is at h_min but tolerance still violated — warn and accept
+                warnings.warn(
+                    f"Tolerance not met at t={t:.6g} (error={error:.2e}, "
+                    f"tol={tol:.2e}). Step size already at h_min={h_min:.2e}.",
+                    stacklevel=2,
+                )
 
             # Accept the more accurate result (two half-steps)
             y = y_half

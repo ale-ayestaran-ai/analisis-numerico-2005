@@ -8,3 +8,9 @@ SOLVERS = {
     "Backward Euler": euler_backward_step,
     "RK4": rk4_step,
 }
+
+SOLVER_ORDER = {
+    "Forward Euler": 1,
+    "Backward Euler": 1,
+    "RK4": 4,
+}

@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 
 from models import MODEL_REGISTRY
-from solvers import SOLVERS, solve
+from solvers import SOLVERS, SOLVER_ORDER, solve
 from visualization.time_series import plot_time_series, plot_comparison
 from visualization.phase_plane import plot_phase_plane
 from visualization.error_plot import plot_error_analysis
@@ -169,7 +169,7 @@ def _make_delay_solver_params(params, y0):
     return solve_params
 
 
-def run_solver(step_fn, model, params, t_span, y0, h, adaptive, tol):
+def run_solver(step_fn, model, params, t_span, y0, h, adaptive, tol, order=1):
     """Run the solver, handling delay model specially."""
     if model.has_delay:
         # For delay models, we integrate manually to build up history
@@ -178,14 +178,16 @@ def run_solver(step_fn, model, params, t_span, y0, h, adaptive, tol):
         history_y = solve_params.pop("_history_y")
 
         result = solve(step_fn, model.f, t_span, y0, h,
-                       adaptive=adaptive, tol=tol or 1e-4, **solve_params)
+                       adaptive=adaptive, tol=tol or 1e-4, order=order,
+                       **solve_params)
 
         # Rebuild history from result for accuracy
         # (the simple history_lookup above works for forward integration)
         return result
     else:
         return solve(step_fn, model.f, t_span, y0, h,
-                     adaptive=adaptive, tol=tol or 1e-4, **params)
+                     adaptive=adaptive, tol=tol or 1e-4, order=order,
+                     **params)
 
 
 # --- Delay model: custom solver that builds history ---
@@ -256,10 +258,11 @@ def solve_with_delay(step_fn, model, params, t_span, y0, h, adaptive, tol):
 
 # --- Run simulation ---
 with st.spinner("Running solver..."):
+    solver_order = SOLVER_ORDER.get(solver_name, 1)
     if model.has_delay:
         result = solve_with_delay(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
     else:
-        result = run_solver(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
+        result = run_solver(step_fn, model, params, (0, t_max), y0, h, adaptive, tol, order=solver_order)
 
 # --- Tabs ---
 if model.n_dims == 2:
@@ -312,13 +315,14 @@ with tab_compare:
         progress = st.progress(0, text="Running solvers...")
         for i, (sname, sfn) in enumerate(solver_list):
             progress.progress((i) / len(solver_list), text=f"Running {sname}...")
+            sorder = SOLVER_ORDER.get(sname, 1)
             if model.has_delay:
                 comparison_results[sname] = solve_with_delay(
                     sfn, model, params, (0, t_max), y0, h, adaptive, tol
                 )
             else:
                 comparison_results[sname] = run_solver(
-                    sfn, model, params, (0, t_max), y0, h, adaptive, tol
+                    sfn, model, params, (0, t_max), y0, h, adaptive, tol, order=sorder
                 )
         progress.progress(1.0, text="Done!")
 
