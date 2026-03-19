@@ -4,7 +4,7 @@ Interactive ODE solver for population dynamics — a faithful recreation of a 20
 
 ## What is this?
 
-In February 2005, I built an interactive Matlab GUI application for my Numerical Analysis final at UBA (Universidad de Buenos Aires). It numerically solves ODE systems modeling population dynamics using three solvers (Forward Euler, Backward Euler, RK4) with adaptive step-size control.
+In February 2005, I built an interactive Matlab GUI application for my Numerical Analysis final at ITBA (Instituto Tecnológico de Buenos Aires). It numerically solves ODE systems modeling population dynamics using three solvers (Forward Euler, Backward Euler, RK4) with adaptive step-size control.
 
 21 years later, I recreated it as a web app with richer visualizations — phase planes, vector fields, error analysis — that weren't possible in old Matlab GUIDE.
 

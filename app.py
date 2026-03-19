@@ -14,17 +14,33 @@ st.set_page_config(
 )
 
 st.title("Análisis Numérico")
-st.caption("Numerical ODE solvers for population dynamics — a 2005 university final, recreated in 2026")
+st.caption("Numerical ODE solvers for population dynamics")
 
 # --- Sidebar ---
 with st.sidebar:
     st.header("Configuration")
 
+    MODEL_HELP = {
+        "Exponential Growth": "Unlimited growth: dN/dt = r*N. Population grows (or decays) exponentially with no constraints.",
+        "Logistic with Delay": "Logistic growth where the population responds to its own density after a time delay tau, which can cause oscillations.",
+        "Predator-Prey": "Classic Lotka-Volterra: prey grow, predators eat prey and die. Produces characteristic population cycles.",
+        "Lotka-Volterra Competition": "Two species competing for the same resource. Outcome depends on competition coefficients — coexistence or exclusion.",
+        "Predator-Prey + Functional Response": "Predator-prey with realistic feeding: Type I (linear), Type II (saturation), or Type III (sigmoidal switching).",
+    }
+
+    SOLVER_HELP = {
+        "Forward Euler": "Simplest method, O(h). Explicit — fast but can be unstable with large step sizes.",
+        "Backward Euler": "Implicit method, O(h). Requires Newton iteration but handles stiff systems well.",
+        "RK4": "Classic 4th-order Runge-Kutta, O(h^4). Excellent accuracy per step — the workhorse of ODE solvers.",
+    }
+
     model_name = st.selectbox("Model", list(MODEL_REGISTRY.keys()))
     model = MODEL_REGISTRY[model_name]
+    st.caption(MODEL_HELP.get(model_name, ""))
 
     solver_name = st.selectbox("Solver", list(SOLVERS.keys()))
     step_fn = SOLVERS[solver_name]
+    st.caption(SOLVER_HELP.get(solver_name, ""))
 
     st.divider()
     st.subheader("Solver Settings")
@@ -77,6 +93,55 @@ with st.sidebar:
         y0_values.append(val)
 
     y0 = np.array(y0_values)
+
+    st.divider()
+    with st.expander("📚 Learn — Models & Methods"):
+        st.markdown("#### Population Models")
+
+        st.markdown("""
+**Exponential Growth** — dN/dt = r·N. Unlimited growth proportional to current population.
+The Malthusian model; good approximation when populations are well below carrying capacity.
+
+**Logistic + Delay** — dN/dt = r·N·(1 - N(t-τ)/K). Adds a carrying capacity K and a time
+delay τ. The delay causes overshoot and oscillations — the larger r·τ, the more dramatic.
+
+**Predator-Prey** — Classic Lotka-Volterra (1925/1926). Prey grow, predators eat prey and
+die. Produces characteristic boom-bust population cycles (e.g., lynx and snowshoe hare).
+
+**Lotka-Volterra Competition** — Two species competing for the same resource. The competition
+coefficients a and b determine whether they coexist or one excludes the other.
+
+**Functional Responses** — Predator-prey with realistic feeding rates:
+- *Type I* (linear): predation rate = C·N, no upper limit
+- *Type II* (Holling): C·N/(1+C·h·N), predator saturates at high prey density
+- *Type III* (sigmoidal): C·N²/(1+C·h·N²), low predation at low prey density (prey refuge)
+""")
+
+        st.markdown("#### Numerical Methods")
+
+        st.markdown("""
+**Forward Euler** — y_{n+1} = y_n + h·f(t_n, y_n). Simplest method, O(h) accuracy.
+Fast but can be unstable with large step sizes. Try Predator-Prey with h=0.5 to see it diverge.
+
+**Backward Euler** — y_{n+1} = y_n + h·f(t_{n+1}, y_{n+1}). Implicit — requires solving a
+nonlinear equation via Newton iteration at each step. Same O(h) accuracy but unconditionally
+stable, making it ideal for stiff systems.
+
+**RK4** — Evaluates f at four points per step, O(h⁴) accuracy. Halving h reduces error by 16x.
+The workhorse of scientific computing — excellent accuracy per function evaluation.
+
+**Adaptive stepping** uses Richardson extrapolation: compares one full step vs two half-steps.
+If error > tolerance, the step is rejected and h is halved. If error < tolerance/4, h is doubled.
+This automatically uses small steps where needed and large steps where the solution is smooth.
+""")
+
+        st.markdown("#### Further Reading")
+        st.markdown("""
+- [Strogatz — Nonlinear Dynamics and Chaos (YouTube lectures)](https://www.youtube.com/playlist?list=PLbN57C5Zdl6j_qJA-pARJnKsmROzPnO9V)
+- [Edelstein-Keshet — *Mathematical Models in Biology* (free PDF)](https://sites.math.rutgers.edu/~zeilberg/Bio25/keshet/keshet0.pdf)
+- [Scholarpedia — Runge-Kutta methods](http://www.scholarpedia.org/article/Runge-Kutta_methods)
+- [Holling's Functional Responses — NIMBioS module](https://legacy.nimbios.org//~gross/bioed/bealsmodules/holling.html)
+""")
 
 
 # --- Build history function for delay model ---
@@ -190,10 +255,11 @@ def solve_with_delay(step_fn, model, params, t_span, y0, h, adaptive, tol):
 
 
 # --- Run simulation ---
-if model.has_delay:
-    result = solve_with_delay(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
-else:
-    result = run_solver(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
+with st.spinner("Running solver..."):
+    if model.has_delay:
+        result = solve_with_delay(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
+    else:
+        result = run_solver(step_fn, model, params, (0, t_max), y0, h, adaptive, tol)
 
 # --- Tabs ---
 if model.n_dims == 2:
@@ -242,7 +308,10 @@ with tab_compare:
 
     if st.button("Run comparison", type="primary"):
         comparison_results = {}
-        for sname, sfn in SOLVERS.items():
+        solver_list = list(SOLVERS.items())
+        progress = st.progress(0, text="Running solvers...")
+        for i, (sname, sfn) in enumerate(solver_list):
+            progress.progress((i) / len(solver_list), text=f"Running {sname}...")
             if model.has_delay:
                 comparison_results[sname] = solve_with_delay(
                     sfn, model, params, (0, t_max), y0, h, adaptive, tol
@@ -251,6 +320,7 @@ with tab_compare:
                 comparison_results[sname] = run_solver(
                     sfn, model, params, (0, t_max), y0, h, adaptive, tol
                 )
+        progress.progress(1.0, text="Done!")
 
         fig_comp = plot_comparison(comparison_results, model.var_names)
         st.plotly_chart(fig_comp, use_container_width=True)
@@ -268,5 +338,5 @@ with tab_compare:
 st.divider()
 st.caption(
     "Originally built as a Matlab GUIDE application for the Numerical Analysis final, "
-    "Universidad de Buenos Aires, February 2005. Recreated in Python + Streamlit, 2026."
+    "ITBA (Instituto Tecnológico de Buenos Aires), February 2005. Recreated in Python + Streamlit, 2026."
 )
