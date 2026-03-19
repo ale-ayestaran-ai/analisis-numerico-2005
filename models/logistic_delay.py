@@ -16,11 +16,21 @@ def _f(t, y, r=1.0, K=100.0, tau=1.0, history=None, **kw):
     return np.array([r * n * (1 - n_old / K)])
 
 
-def _jacobian(t, y, r=1.0, K=100.0, tau=1.0, **kw):
-    # Approximate: treating n_old as constant for Newton iteration
+def _jacobian(t, y, r=1.0, K=100.0, tau=1.0, history=None, **kw):
+    """Jacobian w.r.t. current state n(t).
+
+    With delay: n_old = n(t-tau) is a past value, constant w.r.t. n(t),
+    so df/dn = r * (1 - n_old / K).
+    Without delay (fallback to standard logistic): df/dn = r * (1 - 2n/K).
+    """
     n = y[0]
-    n_old = n  # Simplified for backward Euler
-    return np.array([[r * (1 - n_old / K) - r * n / K]])
+    if history is not None and tau > 0:
+        n_old = history(t - tau)
+        if isinstance(n_old, (list, np.ndarray)):
+            n_old = n_old[0]
+        return np.array([[r * (1 - n_old / K)]])
+    else:
+        return np.array([[r * (1 - 2 * n / K)]])
 
 
 logistic_delay_model = Model(

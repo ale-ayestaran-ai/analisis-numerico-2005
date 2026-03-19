@@ -15,6 +15,7 @@ def _f(t, y, r=1.0, K=200.0, q=1.0, C=0.01, D=0.5, g_conv=0.1,
     """
     n, p = y[0], y[1]
     n = max(n, 0)  # Prevent negative populations in intermediate steps
+    p = max(p, 0)
 
     if response_type == "Type I":
         fr = C * n
@@ -44,7 +45,7 @@ def _jacobian(t, y, r=1.0, K=200.0, q=1.0, C=0.01, D=0.5, g_conv=0.1,
         fr = C * n**2 / denom
         dfr_dn = 2 * C * n / denom**2
 
-    dn_dn = r * (1 - (n / K)**q) - r * n * q * (n / K)**(q - 1) / K - dfr_dn * p
+    dn_dn = r * (1 - (q + 1) * (n / K)**q) - dfr_dn * p
     dn_dp = -fr
     dp_dn = g_conv * p * dfr_dn
     dp_dp = g_conv * (fr - D)
@@ -65,26 +66,41 @@ def _nullclines(params, n_range):
     n_vals = np.linspace(0.01, max(n_range) if hasattr(n_range, '__len__') else n_range, 300)
 
     # Predator nullcline: dp/dt = 0 -> FR = D -> vertical line at critical N
-    if response_type == "Type I":
-        n_star = D / C if C != 0 else 0
+    # If C=0 or the feeding rate can't sustain mortality, nullcline doesn't exist
+    if C == 0:
+        n_star = np.nan
+    elif response_type == "Type I":
+        n_star = D / C
     elif response_type == "Type II":
-        n_star = D / (C * (1 - h_handling * D)) if C * (1 - h_handling * D) != 0 else 0
+        denom = C * (1 - h_handling * D)
+        n_star = D / denom if denom > 0 else np.nan
     else:  # Type III
-        val = D / (C * (1 - h_handling * D)) if C * (1 - h_handling * D) != 0 else 0
-        n_star = np.sqrt(max(val, 0))
+        denom = C * (1 - h_handling * D)
+        n_star = np.sqrt(D / denom) if denom > 0 else np.nan
 
     # Prey nullcline: dn/dt = 0 -> p = r*n*(1-(n/K)^q) / FR
-    if response_type == "Type I":
-        # p = -((n/K)^q - 1) * r / C
-        p_null = -((n_vals / K)**q - 1) * r / C if C != 0 else np.zeros_like(n_vals)
-    elif response_type == "Type II":
-        # p = -((n/K)^q - 1) * r/C * (C*h*n + 1)
-        p_null = -((n_vals / K)**q - 1) * r / C * (C * h_handling * n_vals + 1) if C != 0 else np.zeros_like(n_vals)
-    else:  # Type III
-        # p = -((n/K)^q - 1) * r/(C*n) * (C*h*n^2 + 1)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            p_null = -((n_vals / K)**q - 1) * r / (C * n_vals) * (C * h_handling * n_vals**2 + 1)
-            p_null = np.where(np.isfinite(p_null), p_null, 0)
+    # When C=0 (no predation), prey nullcline is simply n=K
+    if C == 0:
+        prey_nullcline = {
+            "type": "vertical",
+            "value": K,
+            "label": "Prey nullcline (dN/dt=0)",
+        }
+    else:
+        if response_type == "Type I":
+            p_null = (1 - (n_vals / K)**q) * r / C
+        elif response_type == "Type II":
+            p_null = (1 - (n_vals / K)**q) * r / C * (C * h_handling * n_vals + 1)
+        else:  # Type III
+            with np.errstate(divide='ignore', invalid='ignore'):
+                p_null = (1 - (n_vals / K)**q) * r / (C * n_vals) * (C * h_handling * n_vals**2 + 1)
+                p_null = np.where(np.isfinite(p_null), p_null, 0)
+        p_null = np.maximum(p_null, 0.0)
+        prey_nullcline = {
+            "type": "curve",
+            "x": n_vals, "y": p_null,
+            "label": "Prey nullcline (dN/dt=0)",
+        }
 
     return {
         "pred_nullcline": {
@@ -92,11 +108,7 @@ def _nullclines(params, n_range):
             "value": n_star,
             "label": "Predator nullcline (dP/dt=0)",
         },
-        "prey_nullcline": {
-            "type": "curve",
-            "x": n_vals, "y": p_null,
-            "label": "Prey nullcline (dN/dt=0)",
-        },
+        "prey_nullcline": prey_nullcline,
     }
 
 

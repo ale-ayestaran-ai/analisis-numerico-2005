@@ -1,5 +1,6 @@
 import numpy as np
 import plotly.graph_objects as go
+import plotly.figure_factory as ff
 from solvers.adaptive import SolveResult
 
 
@@ -47,41 +48,31 @@ def plot_phase_plane(result: SolveResult, model, params: dict,
         y_pts = np.linspace(0, y_max, n_grid)
         X, Y = np.meshgrid(x_pts, y_pts)
 
-        U = np.zeros_like(X)
-        V = np.zeros_like(Y)
-
-        for i in range(n_grid):
-            for j in range(n_grid):
-                state = np.array([X[i, j], Y[i, j]])
-                deriv = model.f(0, state, **params)
-                U[i, j] = deriv[0]
-                V[i, j] = deriv[1]
+        # Evaluate derivatives at all grid points (flattened to avoid nested loops)
+        states = np.column_stack((X.ravel(), Y.ravel()))
+        derivs = np.array([model.f(0, s, **params) for s in states])
+        U = derivs[:, 0].reshape(n_grid, n_grid)
+        V = derivs[:, 1].reshape(n_grid, n_grid)
 
         # Normalize arrows for visibility
-        magnitude = np.sqrt(U**2 + V**2)
+        magnitude = np.hypot(U, V)
         max_mag = magnitude.max()
         if max_mag > 0:
-            scale = x_max / n_grid * 0.4
-            U_norm = U / max_mag * scale
-            V_norm = V / max_mag * scale
+            U_norm = U / max_mag
+            V_norm = V / max_mag
 
-        # Draw as annotations (Plotly quiver)
-        for i in range(n_grid):
-            for j in range(n_grid):
-                if max_mag > 0 and magnitude[i, j] > max_mag * 0.01:
-                    fig.add_annotation(
-                        x=X[i, j] + U_norm[i, j],
-                        y=Y[i, j] + V_norm[i, j],
-                        ax=X[i, j],
-                        ay=Y[i, j],
-                        xref="x", yref="y",
-                        axref="x", ayref="y",
-                        showarrow=True,
-                        arrowhead=2,
-                        arrowsize=1,
-                        arrowwidth=1,
-                        arrowcolor="rgba(150,150,150,0.4)",
-                    )
+            # Filter out very small arrows
+            mask = magnitude > (max_mag * 0.01)
+
+            # Single quiver trace instead of hundreds of annotations
+            quiver_fig = ff.create_quiver(
+                X[mask], Y[mask], U_norm[mask], V_norm[mask],
+                scale=x_max / n_grid * 0.4,
+                arrow_scale=0.3,
+                name="Vector Field",
+                line=dict(width=1, color="rgba(150,150,150,0.6)"),
+            )
+            fig.add_trace(quiver_fig.data[0])
 
     # Nullclines
     if show_nullclines and model.nullcline_funcs is not None:
@@ -90,14 +81,14 @@ def plot_phase_plane(result: SolveResult, model, params: dict,
 
         for idx, (key, nc) in enumerate(nullclines.items()):
             color = nc_colors[idx % len(nc_colors)]
-            if nc["type"] == "vertical":
+            if nc["type"] == "vertical" and np.isfinite(nc["value"]):
                 fig.add_vline(
                     x=nc["value"],
                     line=dict(color=color, width=2, dash="dash"),
                     annotation_text=nc["label"],
                     annotation_position="top right",
                 )
-            elif nc["type"] == "horizontal":
+            elif nc["type"] == "horizontal" and np.isfinite(nc["value"]):
                 fig.add_hline(
                     y=nc["value"],
                     line=dict(color=color, width=2, dash="dash"),
