@@ -1,5 +1,7 @@
 # Análisis Numérico (2005 → 2026)
 
+**[Live demo](https://animal-population-dynamics.streamlit.app/)**
+
 Interactive ODE solver for population dynamics — a faithful recreation of a 2005 Matlab university final as a modern web app.
 
 ## What is this?
